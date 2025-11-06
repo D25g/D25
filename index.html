@@ -482,8 +482,14 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-await setPersistence(auth, browserLocalPersistence);
+// top-level persistence (wrapped in try/catch so failures don't break everything)
+try {
+  await setPersistence(auth, browserLocalPersistence);
+} catch (err) {
+  console.warn("setPersistence failed:", err);
+}
 
+// Globals
 let teamPhotos = {};
 let hiddenMatchdays = {};
 let currentUserId = null;
@@ -493,69 +499,56 @@ let activeDocId = null;
 let teamRatings = {}; // ✅ Store ratings from playerlist
 let globalTitle = ""; // ✅ global title
 
+// Helper: safe element getter
+function $id(id) {
+  return document.getElementById(id) || null;
+}
+
 // ✅ Load team photos + ratings from playerlist
 async function loadTeamPhotosAndRatings() {
-  const snap = await getDocs(collection(db, "playerlist"));
-  snap.forEach(docSnap => {
-    const data = docSnap.data();
-    if (data.teamName) {
-      const teamKey = data.teamName.trim().toLowerCase();
-      if (data.photoUrl) teamPhotos[teamKey] = data.photoUrl;
-      if (data.idRating) teamRatings[teamKey] = data.idRating;
-    }
-  });
+  try {
+    const snap = await getDocs(collection(db, "playerlist"));
+    snap.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data && data.teamName) {
+        const teamKey = data.teamName.trim().toLowerCase();
+        if (data.photoUrl) teamPhotos[teamKey] = data.photoUrl;
+        if (data.idRating) teamRatings[teamKey] = data.idRating;
+      }
+    });
+  } catch (err) {
+    console.error("Failed to load playerlist:", err);
+  }
 }
 
 // ✅ Date Formatting
 function formatDateAndTime(dateStr) {
+  if (!dateStr) return "Date N/A";
   const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "Invalid Date";
   const day = date.getDate().toString().padStart(2, "0");
   const month = date.toLocaleString("default", { month: "short" }).toUpperCase();
   const year = date.getFullYear();
   return `${day}, ${month}, ${year}`;
 }
 
-// ✅ Auth Listener
-onAuthStateChanged(auth, async (user) => {
-  if (!user) return window.location.href = "login.html";
-  currentUserId = user.uid;
-
-  const userRef = doc(db, "users", user.uid);
-  const userSnap = await getDoc(userRef);
-
-  if (userSnap.exists()) {
-    const data = userSnap.data();
-    document.getElementById("username").innerText = data.username || user.displayName || "User";
-    document.getElementById("userPhoto").src = data.photoUrl || user.photoURL || "default-profile.png";
-    hiddenMatchdays = data.hiddenMatchdays || {};
-  } else {
-    document.getElementById("username").innerText = user.displayName || "User";
-    document.getElementById("userPhoto").src = user.photoURL || "default-profile.png";
-    hiddenMatchdays = {};
-  }
-
-  await loadTeamPhotosAndRatings();
-  subscribeHiddenMatchdays();
-  subscribeFixers();
-  subscribeBannerStatus();
-});
-
 // ✅ Update Session Display
 function updateSessionDisplay(sessionName) {
-  const sessionDisplay = document.getElementById("sessionDisplslay");
+  // account for possible typo in HTML id: "sessionDisplslay" or correct "sessionDisplay"
+  const sessionDisplay = $id("sessionDisplay") || $id("sessionDisplslay");
   if (sessionDisplay) sessionDisplay.textContent = sessionName || "";
 }
 
-// ✅ Title Display (🚀 NEW)
+// ✅ Title Display
 function updateTitleDisplay(titleName) {
-  const titleDisplay = document.getElementById("Title");
+  const titleDisplay = $id("Title");
   if (titleDisplay) titleDisplay.textContent = titleName || "";
 }
 
 // ✅ Listen for Banner + Title from toursetting
 function subscribeBannerStatus() {
-  const bannerToggle = document.getElementById("bannerToggle");
-  const countdownEl = document.getElementById("countdown");
+  const bannerToggle = $id("bannerToggle");
+  const countdownEl = $id("countdown");
   const settingsRef = collection(db, "toursetting");
 
   onSnapshot(settingsRef, (snapshot) => {
@@ -564,33 +557,45 @@ function subscribeBannerStatus() {
 
     snapshot.forEach(docSnap => {
       const data = docSnap.data();
-      if (data.isActive === true) {
+      if (data && data.isActive === true) {
         activeDoc = data;
         activeDocId = docSnap.id;
       }
     });
 
     if (activeDoc) {
-      bannerToggle.style.display = "block";
+      if (bannerToggle) bannerToggle.style.display = "block";
       globalTitle = activeDoc.title || "";
       updateTitleDisplay(globalTitle);
       updateSessionDisplay(activeDoc.session);
 
-      if (activeDoc.endTime) startCountdown(activeDoc.endTime, countdownEl);
-      else countdownEl.textContent = "N/A";
+      if (activeDoc.endTime && countdownEl) startCountdown(activeDoc.endTime, countdownEl);
+      else if (countdownEl) countdownEl.textContent = "N/A";
     } else {
-      bannerToggle.style.display = "none";
+      if (bannerToggle) bannerToggle.style.display = "none";
       updateTitleDisplay("");
       updateSessionDisplay("");
-      clearInterval(countdownInterval);
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }
+      if (countdownEl) countdownEl.textContent = "";
     }
 
-    renderFixers();
+    renderFixers(); // re-render after banner change
+  }, (err) => {
+    console.error("subscribeBannerStatus snapshot error:", err);
   });
 }
 
-// ✅ Countdown Logic (unchanged)
+// ✅ Countdown Logic
 function startCountdown(endTimeStr, element) {
+  if (!element) return;
+  if (!endTimeStr) {
+    element.textContent = "N/A";
+    return;
+  }
+
   clearInterval(countdownInterval);
   const endTime = new Date(endTimeStr).getTime();
 
@@ -634,10 +639,15 @@ function startCountdown(endTimeStr, element) {
   countdownInterval = setInterval(updateCountdown, 1000);
 }
 
-// ✅ Render Fixers  (title updated)
+// ✅ Render Fixers
 function renderFixers() {
-  const fixersContainer = document.getElementById("fixers-list");
-  if (!fixersData.length) {
+  const fixersContainer = $id("fixers-list");
+  if (!fixersContainer) {
+    console.warn("No #fixers-list element found.");
+    return;
+  }
+
+  if (!fixersData || !fixersData.length) {
     fixersContainer.innerHTML = `<p class="text-center text-gray-400">No fixers available.</p>`;
     return;
   }
@@ -662,17 +672,17 @@ function renderFixers() {
 
   sortedMatchdays.forEach((md, index) => {
     const matchdayId = `match-day-${index + 1}`;
-    if (hiddenMatchdays[matchdayId]) return;
+    if (hiddenMatchdays && hiddenMatchdays[matchdayId]) return;
 
     matchdaysMap[md]
-      .sort((a, b) => a.groupName.localeCompare(b.groupName) || a.team1.localeCompare(b.team1))
+      .sort((a, b) => (a.groupName || "").localeCompare(b.groupName || "") || (a.team1 || "").localeCompare(b.team1 || ""))
       .forEach(match => {
-        const team1Key = match.team1.trim().toLowerCase();
-        const team2Key = match.team2.trim().toLowerCase();
+        const team1Key = (match.team1 || "").trim().toLowerCase();
+        const team2Key = (match.team2 || "").trim().toLowerCase();
         const team1Img = teamPhotos[team1Key] || "dls25.jpg";
         const team2Img = teamPhotos[team2Key] || "dls25.jpg";
-        const t1GoalVal = match.team1Goal ?? "-";
-        const t2GoalVal = match.team2Goal ?? "-";
+        const t1GoalVal = (typeof match.team1Goal !== "undefined" && match.team1Goal !== null) ? match.team1Goal : "-";
+        const t2GoalVal = (typeof match.team2Goal !== "undefined" && match.team2Goal !== null) ? match.team2Goal : "-";
         const formattedDate = formatDateAndTime(match.date);
         const team1Rating = teamRatings[team1Key] || "N/A";
         const team2Rating = teamRatings[team2Key] || "N/A";
@@ -680,11 +690,11 @@ function renderFixers() {
         html += `
         <div class="match-card">
           <div class="league-badge">
-            <span id="Title">${globalTitle}</span>   <!-- ✅ Title Auto Display -->
+            <span class="Title-inline">${globalTitle}</span>
           </div>
           <div class="team-stack">
-            <img src="${team1Img}" class="team-logo" alt="${match.team1}">
-            <div class="team-name">${match.team1}</div>
+            <img src="${team1Img}" class="team-logo" alt="${match.team1 || 'Team1'}">
+            <div class="team-name">${match.team1 || 'Team 1'}</div>
             <div class="Rating-box font-semibold">⭐ ${team1Rating}</div>
           </div>
           <div class="score-box text-center">
@@ -693,8 +703,8 @@ function renderFixers() {
             <p class="matchday-box">${md}</p>
           </div>
           <div class="team-stack">
-            <img src="${team2Img}" class="team-logo" alt="${match.team2}">
-            <div class="team-name">${match.team2}</div>
+            <img src="${team2Img}" class="team-logo" alt="${match.team2 || 'Team2'}">
+            <div class="team-name">${match.team2 || 'Team 2'}</div>
             <div class="Rating-box font-semibold">⭐ ${team2Rating}</div>
           </div>
         </div>`;
@@ -704,58 +714,141 @@ function renderFixers() {
   fixersContainer.innerHTML = html;
 }
 
-// ✅ Sidebar toggle + logout (unchanged)
-const sidebar = document.getElementById("sidebar");
-const overlay = document.getElementById("overlay");
-const menuButton = document.getElementById("menuButton");
-const closeSidebar = document.getElementById("closeSidebar");
-
-menuButton.addEventListener("click", () => {
-  sidebar.classList.add("active");
-  overlay.classList.add("active");
-});
-
-closeSidebar.addEventListener("click", () => {
-  sidebar.classList.remove("active");
-  overlay.classList.remove("active");
-});
-
-overlay.addEventListener("click", () => {
-  sidebar.classList.remove("active");
-  overlay.classList.remove("active");
-});
-
-// ✅ Logout
-logoutBtn.addEventListener("click", async () => {
-  const result = await Swal.fire({
-    title: "Logout?",
-    text: "Are you sure you want to log out?",
-    icon: "warning",
-    showCancelButton: true,
-    confirmButtonColor: "#d33",
-    cancelButtonColor: "#3085d6",
-    confirmButtonText: "Yes, Logout"
-  });
-
-  if (result.isConfirmed) {
-    try {
-      await signOut(auth);
-      Swal.fire({
-        icon: "success",
-        title: "Logged out successfully!",
-        showConfirmButton: false,
-        timer: 1500
+// ✅ Subscribe Fixers collection
+function subscribeFixers() {
+  try {
+    const fixersRef = collection(db, "fixers");
+    onSnapshot(fixersRef, (snapshot) => {
+      fixersData = [];
+      snapshot.forEach(docSnap => {
+        const d = docSnap.data();
+        if (d) fixersData.push(d);
       });
-      setTimeout(() => {
-        window.location.href = "login.html";
-      }, 1500);
-    } catch (error) {
-      Swal.fire("Error", "Failed to log out. Please try again.", "error");
+      renderFixers();
+    }, (err) => {
+      console.error("subscribeFixers snapshot error:", err);
+    });
+  } catch (err) {
+    console.error("subscribeFixers failed:", err);
+  }
+}
+
+// ✅ Subscribe Hidden Matchdays (if stored on user doc, initial load handled in onAuthStateChanged)
+function subscribeHiddenMatchdays() {
+  // intentionally left simple: hiddenMatchdays updated from user doc on auth load
+  renderFixers();
+}
+
+// ✅ Auth Listener
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    // redirect if not logged in (only if element exists or this behaviour is desired)
+    try { window.location.href = "login.html"; } catch(e) {}
+    return;
+  }
+
+  currentUserId = user.uid;
+
+  try {
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      const usernameEl = $id("username");
+      const userPhotoEl = $id("userPhoto");
+      if (usernameEl) usernameEl.innerText = data.username || user.displayName || "User";
+      if (userPhotoEl) userPhotoEl.src = data.photoUrl || user.photoURL || "default-profile.png";
+      hiddenMatchdays = data.hiddenMatchdays || {};
+    } else {
+      const usernameEl = $id("username");
+      const userPhotoEl = $id("userPhoto");
+      if (usernameEl) usernameEl.innerText = user.displayName || "User";
+      if (userPhotoEl) userPhotoEl.src = user.photoURL || "default-profile.png";
+      hiddenMatchdays = {};
     }
+
+    await loadTeamPhotosAndRatings();
+    subscribeHiddenMatchdays();
+    subscribeFixers();
+    subscribeBannerStatus();
+  } catch (err) {
+    console.error("Auth state handling error:", err);
+  }
+});
+
+// Wait for DOM to be ready before wiring UI elements that may be missing early
+document.addEventListener("DOMContentLoaded", () => {
+  // Sidebar toggle + overlay + menu button
+  const sidebar = $id("sidebar");
+  const overlay = $id("overlay");
+  const menuButton = $id("menuButton");
+  const closeSidebar = $id("closeSidebar");
+
+  if (menuButton) {
+    menuButton.addEventListener("click", () => {
+      if (sidebar) sidebar.classList.add("active");
+      if (overlay) overlay.classList.add("active");
+    });
+  } else {
+    console.warn("menuButton not found in DOM.");
+  }
+
+  if (closeSidebar) {
+    closeSidebar.addEventListener("click", () => {
+      if (sidebar) sidebar.classList.remove("active");
+      if (overlay) overlay.classList.remove("active");
+    });
+  } else {
+    console.warn("closeSidebar not found in DOM.");
+  }
+
+  if (overlay) {
+    overlay.addEventListener("click", () => {
+      if (sidebar) sidebar.classList.remove("active");
+      overlay.classList.remove("active");
+    });
+  } else {
+    console.warn("overlay element not found in DOM.");
+  }
+
+  // Logout button
+  const logoutBtn = $id("logoutBtn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      const result = await Swal.fire({
+        title: "Logout?",
+        text: "Are you sure you want to log out?",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#d33",
+        cancelButtonColor: "#3085d6",
+        confirmButtonText: "Yes, Logout"
+      });
+
+      if (result.isConfirmed) {
+        try {
+          await signOut(auth);
+          Swal.fire({
+            icon: "success",
+            title: "Logged out successfully!",
+            showConfirmButton: false,
+            timer: 1500
+          });
+          setTimeout(() => {
+            window.location.href = "login.html";
+          }, 1500);
+        } catch (error) {
+          Swal.fire("Error", "Failed to log out. Please try again.", "error");
+        }
+      }
+    });
+  } else {
+    console.warn("logoutBtn not found in DOM.");
   }
 });
 </script>
 
    
 </body>
-</html>
+        </html>
