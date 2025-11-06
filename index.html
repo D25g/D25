@@ -491,6 +491,7 @@ let fixersData = [];
 let countdownInterval = null;
 let activeDocId = null;
 let teamRatings = {}; // ✅ Store ratings from playerlist
+let globalTitle = ""; // ✅ global title
 
 // ✅ Load team photos + ratings from playerlist
 async function loadTeamPhotosAndRatings() {
@@ -539,32 +540,19 @@ onAuthStateChanged(auth, async (user) => {
   subscribeBannerStatus();
 });
 
-// ✅ Listen for hidden matchdays
-function subscribeHiddenMatchdays() {
-  const userRef = doc(db, "users", currentUserId);
-  onSnapshot(userRef, (snap) => {
-    hiddenMatchdays = snap.exists() ? snap.data().hiddenMatchdays || {} : {};
-    renderFixers();
-  });
-}
-
-// ✅ Listen for Fixers Collection
-function subscribeFixers() {
-  const fixersRef = collection(db, "fixers");
-  onSnapshot(query(fixersRef), (snapshot) => {
-    fixersData = [];
-    snapshot.forEach(docSnap => fixersData.push(docSnap.data()));
-    renderFixers();
-  });
-}
-
 // ✅ Update Session Display
 function updateSessionDisplay(sessionName) {
   const sessionDisplay = document.getElementById("sessionDisplslay");
   if (sessionDisplay) sessionDisplay.textContent = sessionName || "";
 }
 
-// ✅ Banner + Countdown
+// ✅ Title Display (🚀 NEW)
+function updateTitleDisplay(titleName) {
+  const titleDisplay = document.getElementById("Title");
+  if (titleDisplay) titleDisplay.textContent = titleName || "";
+}
+
+// ✅ Listen for Banner + Title from toursetting
 function subscribeBannerStatus() {
   const bannerToggle = document.getElementById("bannerToggle");
   const countdownEl = document.getElementById("countdown");
@@ -584,11 +572,15 @@ function subscribeBannerStatus() {
 
     if (activeDoc) {
       bannerToggle.style.display = "block";
+      globalTitle = activeDoc.title || "";
+      updateTitleDisplay(globalTitle);
       updateSessionDisplay(activeDoc.session);
+
       if (activeDoc.endTime) startCountdown(activeDoc.endTime, countdownEl);
       else countdownEl.textContent = "N/A";
     } else {
       bannerToggle.style.display = "none";
+      updateTitleDisplay("");
       updateSessionDisplay("");
       clearInterval(countdownInterval);
     }
@@ -597,7 +589,7 @@ function subscribeBannerStatus() {
   });
 }
 
-// ✅ Countdown Logic
+// ✅ Countdown Logic (unchanged)
 function startCountdown(endTimeStr, element) {
   clearInterval(countdownInterval);
   const endTime = new Date(endTimeStr).getTime();
@@ -642,7 +634,7 @@ function startCountdown(endTimeStr, element) {
   countdownInterval = setInterval(updateCountdown, 1000);
 }
 
-// ✅ Render Fixers
+// ✅ Render Fixers  (title updated)
 function renderFixers() {
   const fixersContainer = document.getElementById("fixers-list");
   if (!fixersData.length) {
@@ -688,7 +680,7 @@ function renderFixers() {
         html += `
         <div class="match-card">
           <div class="league-badge">
-            DLS Champion League (DSL Session-10)
+            <span id="Title">${globalTitle}</span>   <!-- ✅ Title Auto Display -->
           </div>
           <div class="team-stack">
             <img src="${team1Img}" class="team-logo" alt="${match.team1}">
@@ -712,7 +704,7 @@ function renderFixers() {
   fixersContainer.innerHTML = html;
 }
 
-// ✅ Sidebar toggle
+// ✅ Sidebar toggle + logout (unchanged)
 const sidebar = document.getElementById("sidebar");
 const overlay = document.getElementById("overlay");
 const menuButton = document.getElementById("menuButton");
@@ -764,6 +756,6 @@ logoutBtn.addEventListener("click", async () => {
 });
 </script>
 
-
+   
 </body>
 </html>
