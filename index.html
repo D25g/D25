@@ -381,7 +381,7 @@
         class="user-icon-glow w-16 h-16 rounded-full object-cover" />
       <h3 id="username" class="text-sm font-semibold text-yellow-gray-00 mt-1">...</h3>
       <div class="rank-badge text-xs">Rank Level:<span class="ml-1">74</span></div>
-      <div class="balance-badge">Gaming Balance:<span class="ml-1">৳2,450</span></div>
+      <div class="balance-badge">Gaming Balance:<span id="balance" class="ml-1">৳</span></div>
     </div>
 
     <nav class="p-4 space-y-3">
@@ -466,7 +466,7 @@ import {
   getAuth, setPersistence, browserLocalPersistence, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
-// 🔥 Firebase Config
+// ✅ Firebase Config
 const firebaseConfig = {
   apiKey: "AIzaSyDooTNeDHoWUU9nLxYxyBIhewydt7Xl_M0",
   authDomain: "dlstournament-31ac1.firebaseapp.com",
@@ -505,13 +505,30 @@ async function loadTeamPhotosAndRatings() {
   });
 }
 
-// ✅ Date Formatting
+// ✅ DATE Format
 function formatDateAndTime(dateStr) {
   const date = new Date(dateStr);
   const day = date.getDate().toString().padStart(2, "0");
   const month = date.toLocaleString("default", { month: "short" }).toUpperCase();
   const year = date.getFullYear();
   return `${day}, ${month}, ${year}`;
+}
+
+// ✅ Realtime Balance listener (added)
+function subscribeUserBalance() {
+  if (!currentUserId) return;
+  const userRef = doc(db, "users", currentUserId);
+
+  onSnapshot(userRef, (userSnap) => {
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+
+      const balanceElement = document.getElementById("balance");
+      if (balanceElement) {
+        balanceElement.innerText = data.balance ?? 0; // ✅ Update balance in UI
+      }
+    }
+  });
 }
 
 // ✅ Auth Listener
@@ -527,19 +544,24 @@ onAuthStateChanged(auth, async (user) => {
     document.getElementById("username").innerText = data.username || user.displayName || "User";
     document.getElementById("userPhoto").src = data.photoUrl || user.photoURL || "default-profile.png";
     hiddenMatchdays = data.hiddenMatchdays || {};
+
+    // ✅ Show balance once user loads
+    document.getElementById("balance").innerText = data.balance ?? 0;
+
   } else {
     document.getElementById("username").innerText = user.displayName || "User";
     document.getElementById("userPhoto").src = user.photoURL || "default-profile.png";
     hiddenMatchdays = {};
   }
 
+  subscribeUserBalance(); // ✅ listen balance realtime
   await loadTeamPhotosAndRatings();
   subscribeHiddenMatchdays();
   subscribeFixers();
   subscribeBannerStatus();
 });
 
-// ✅ Listen for hidden matchdays
+// ✅ Listen for Hidden Matchdays
 function subscribeHiddenMatchdays() {
   const userRef = doc(db, "users", currentUserId);
   onSnapshot(userRef, (snap) => {
@@ -630,11 +652,9 @@ function startCountdown(endTimeStr, element) {
     const seconds = Math.floor((distance / 1000) % 60);
 
     if (days > 0) {
-      element.textContent =
-        `${days}D:${hours.toString().padStart(2, "0")}H:${minutes.toString().padStart(2, "0")}M:${seconds.toString().padStart(2, "0")}S`;
+      element.textContent = `${days}D:${hours.toString().padStart(2, "0")}H:${minutes.toString().padStart(2, "0")}M:${seconds.toString().padStart(2, "0")}S`;
     } else {
-      element.textContent =
-        `${hours.toString().padStart(2, "0")}H:${minutes.toString().padStart(2, "0")}M:${seconds.toString().padStart(2, "0")}S`;
+      element.textContent = `${hours.toString().padStart(2, "0")}H:${minutes.toString().padStart(2, "0")}M:${seconds.toString().padStart(2, "0")}S`;
     }
   }
 
@@ -642,7 +662,7 @@ function startCountdown(endTimeStr, element) {
   countdownInterval = setInterval(updateCountdown, 1000);
 }
 
-// ✅ Render Fixers
+// ✅_RENDER FIXERS (unchanged)
 function renderFixers() {
   const fixersContainer = document.getElementById("fixers-list");
   if (!fixersData.length) {
@@ -764,6 +784,5 @@ logoutBtn.addEventListener("click", async () => {
 });
 </script>
 
-
 </body>
-    </html>
+  </html>
