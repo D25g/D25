@@ -478,22 +478,20 @@ const firebaseConfig = {
   measurementId: "G-0DGFJEV6GL"
 };
 
-// ✅ Init Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
 await setPersistence(auth, browserLocalPersistence);
 
-// ✅ Globals
 let teamPhotos = {};
 let teamRatings = {};
-let currentUserId = null;
-let hiddenMatchdays = {};
 let fixersData = [];
+let hiddenMatchdays = {};
+let currentUserId = null;
 let countdownInterval = null;
 let activeDocId = null;
-let activeSession = "";   // ✅ Session saved & always shown
+let activeSession = ""; // ✅ SESSION ALWAYS SAVED
 
 // ✅ Load Team Photos + Ratings
 async function loadTeamPhotosAndRatings() {
@@ -507,24 +505,32 @@ async function loadTeamPhotosAndRatings() {
   });
 }
 
-// ✅ Format Date
+// ✅ Date format function
 function formatDateAndTime(dateStr) {
   const date = new Date(dateStr);
   return `${date.getDate().toString().padStart(2,"0")}, ${date.toLocaleString("default",{month:"short"}).toUpperCase()}, ${date.getFullYear()}`;
 }
 
-// ✅ Auth Listener
+// ✅ Show session on header / UI
+function updateSessionDisplay(sessionName) {
+  const sessionDisplay = document.getElementById("sessionDisplay"); // ✅ FIXED ID
+  if (sessionDisplay) sessionDisplay.textContent = sessionName ?? "";
+}
+
+// ✅ AUTH LISTENER
 onAuthStateChanged(auth, async (user) => {
   if (!user) return window.location.href = "login.html";
   currentUserId = user.uid;
 
-  const userRef = doc(db, "users", user.uid);
-  const userSnap = await getDoc(userRef);
+  const userRef = doc(db, "users", currentUserId);
+  const snap = await getDoc(userRef);
 
-  document.getElementById("username").innerText = userSnap.exists() ? (userSnap.data().username || "User") : (user.displayName || "User");
-  document.getElementById("userPhoto").src = userSnap.exists() ? (userSnap.data().photoUrl || "default-profile.png") : "default-profile.png";
-
-  hiddenMatchdays = userSnap.exists() ? (userSnap.data().hiddenMatchdays || {}) : {};
+  if (snap.exists()) {
+    const data = snap.data();
+    document.getElementById("username").innerText = data.username ?? "User";
+    document.getElementById("userPhoto").src = data.photoUrl ?? "default-profile.png";
+    hiddenMatchdays = data.hiddenMatchdays ?? {};
+  }
 
   await loadTeamPhotosAndRatings();
   subscribeHiddenMatchdays();
@@ -532,24 +538,25 @@ onAuthStateChanged(auth, async (user) => {
   subscribeBannerStatus();
 });
 
-// ✅ Hidden Matchday Live Sync
+// ✅ Hidden matchdays listener
 function subscribeHiddenMatchdays() {
   const userRef = doc(db, "users", currentUserId);
   onSnapshot(userRef, (snap) => {
-    hiddenMatchdays = snap.exists() ? snap.data().hiddenMatchdays || {} : {};
+    hiddenMatchdays = snap.exists() ? snap.data().hiddenMatchdays ?? {} : {};
     renderFixers();
   });
 }
 
-// ✅ Fixers Listener
+// ✅ Fixers collection listener
 function subscribeFixers() {
-  onSnapshot(query(collection(db, "fixers")), (snapshot) => {
+  const fixersRef = collection(db, "fixers");
+  onSnapshot(query(fixersRef), (snapshot) => {
     fixersData = snapshot.docs.map(doc => doc.data());
     renderFixers();
   });
 }
 
-// ✅ Banner & Session Tracking
+// ✅ Banner + session tracking + countdown
 function subscribeBannerStatus() {
   const bannerToggle = document.getElementById("bannerToggle");
   const countdownEl = document.getElementById("countdown");
@@ -558,16 +565,18 @@ function subscribeBannerStatus() {
     activeDocId = null;
 
     snapshot.forEach(docSnap => {
-      const setting = docSnap.data();
-      if (setting.session) activeSession = setting.session;   // ✅ always store last known session
+      const data = docSnap.data();
 
-      if (setting.isActive === true) {
+      if (data.session) activeSession = data.session;    // ✅ ALWAYS SAVE SESSION
+
+      if (data.isActive === true) {
         activeDocId = docSnap.id;
-        if (countdownEl) startCountdown(setting.endTime, countdownEl);
+        if (data.endTime) startCountdown(data.endTime, countdownEl);
       }
     });
 
-    bannerToggle.style.display = activeDocId ? "block" : "none"; // ✅ countdown hide but session still shows
+    bannerToggle.style.display = activeDocId ? "block" : "none";
+    updateSessionDisplay(activeSession);  // ✅ UPDATE HEADER
     renderFixers();
   });
 }
@@ -579,6 +588,7 @@ function startCountdown(endTimeStr, element) {
 
   function update() {
     const diff = endTime - Date.now();
+
     if (diff <= 0) {
       clearInterval(countdownInterval);
       element.textContent = "0D:0H:0M:0S";
@@ -586,10 +596,10 @@ function startCountdown(endTimeStr, element) {
       return;
     }
 
-    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
-    const m = Math.floor((diff / (1000 * 60)) % 60);
-    const s = Math.floor((diff / 1000) % 60);
+    const d = Math.floor(diff / 86400000);
+    const h = Math.floor((diff % 86400000) / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
 
     element.textContent = d > 0 ? `${d}D:${h}H:${m}M:${s}S` : `${h}H:${m}M:${s}S`;
   }
@@ -598,13 +608,13 @@ function startCountdown(endTimeStr, element) {
   countdownInterval = setInterval(update, 1000);
 }
 
-// ✅ Render Fixers (SESSION ALWAYS SHOW)
+// ✅ Render Fixers (SESSION ALWAYS DISPLAY IN MATCH CARD)
 function renderFixers() {
   const container = document.getElementById("fixers-list");
   if (!container) return;
 
   const todayStr = new Date().toISOString().split("T")[0];
-  const todayMatches = fixersData.filter(f => f.date && new Date(f.date).toISOString().split("T")[0] === todayStr);
+  const todayMatches = fixersData.filter(f => new Date(f.date).toISOString().split("T")[0] === todayStr);
 
   if (!todayMatches.length) {
     container.innerHTML = `<p class="text-center text-gray-400">No matches scheduled for today.</p>`;
@@ -612,33 +622,33 @@ function renderFixers() {
   }
 
   let html = "";
-  todayMatches.forEach(fix => {
-    const team1 = fix.team1.trim().toLowerCase();
-    const team2 = fix.team2.trim().toLowerCase();
+  todayMatches.forEach(match => {
+    const t1 = match.team1.trim().toLowerCase();
+    const t2 = match.team2.trim().toLowerCase();
 
     html += `
       <div class="match-card">
-         <div class="league-badge">
-            DLS Champion League ( Session-<span><b>${activeSession}</b></span> )
-         </div>
+        <div class="league-badge">
+          DLS Champion League ( Session-<b>${activeSession}</b> )
+        </div>
 
-         <div class="team-stack">
-           <img src="${teamPhotos[team1] || "dls25.jpg"}" class="team-logo">
-           <div class="team-name">${fix.team1}</div>
-           <div class="Rating-box font-semibold">⭐ ${teamRatings[team1] || "N/A"}</div>
-         </div>
+        <div class="team-stack">
+          <img src="${teamPhotos[t1] ?? "dls25.jpg"}" class="team-logo">
+          <div class="team-name">${match.team1}</div>
+          <div class="Rating-box font-semibold">⭐ ${teamRatings[t1] ?? "N/A"}</div>
+        </div>
 
-         <div class="score-box text-center">
-           <p class="text-3xl font-bold">${fix.team1Goal ?? "-"} : ${fix.team2Goal ?? "-"}</p>
-           <p class="date-box">${formatDateAndTime(fix.date)}</p>
-           <p class="matchday-box">${fix.matchday}</p>
-         </div>
+        <div class="score-box text-center">
+          <p class="text-3xl font-bold">${match.team1Goal ?? "-"} : ${match.team2Goal ?? "-"}</p>
+          <p class="date-box text-xs font-semibold mb-1">${formatDateAndTime(match.date)}</p>
+          <p class="matchday-box">${match.matchday}</p>
+        </div>
 
-         <div class="team-stack">
-           <img src="${teamPhotos[team2] || "dls25.jpg"}" class="team-logo">
-           <div class="team-name">${fix.team2}</div>
-           <div class="Rating-box font-semibold">⭐ ${teamRatings[team2] || "N/A"}</div>
-         </div>
+        <div class="team-stack">
+          <img src="${teamPhotos[t2] ?? "dls25.jpg"}" class="team-logo">
+          <div class="team-name">${match.team2}</div>
+          <div class="Rating-box font-semibold">⭐ ${teamRatings[t2] ?? "N/A"}</div>
+        </div>
       </div>
     `;
   });
@@ -646,21 +656,21 @@ function renderFixers() {
   container.innerHTML = html;
 }
 
-// ✅ Sidebar
-document.getElementById("menuButton").onclick = () => {
+// ✅ Sidebar toggle
+menuButton.addEventListener("click", () => {
   sidebar.classList.add("active");
   overlay.classList.add("active");
-};
-document.getElementById("closeSidebar").onclick = () => {
+});
+closeSidebar.addEventListener("click", () => {
   sidebar.classList.remove("active");
   overlay.classList.remove("active");
-};
-overlay.onclick = () => {
+});
+overlay.addEventListener("click", () => {
   sidebar.classList.remove("active");
   overlay.classList.remove("active");
-};
+});
 
-// ✅ Logout
+// ✅ Logout button
 logoutBtn.addEventListener("click", async () => {
   const result = await Swal.fire({
     title: "Logout?",
@@ -673,20 +683,14 @@ logoutBtn.addEventListener("click", async () => {
   });
 
   if (result.isConfirmed) {
-    try {
-      await signOut(auth);
-      Swal.fire({
-        icon: "success",
-        title: "Logged out successfully!",
-        showConfirmButton: false,
-        timer: 1500
-      });
-      setTimeout(() => {
-        window.location.href = "login.html";
-      }, 1500);
-    } catch (error) {
-      Swal.fire("Error", "Failed to log out. Please try again.", "error");
-    }
+    await signOut(auth);
+    Swal.fire({
+      icon: "success",
+      title: "Logged out!",
+      showConfirmButton: false,
+      timer: 1500
+    });
+    setTimeout(() => window.location.href = "login.html", 1500);
   }
 });
 </script>
