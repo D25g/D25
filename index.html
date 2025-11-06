@@ -381,7 +381,7 @@
         class="user-icon-glow w-16 h-16 rounded-full object-cover" />
       <h3 id="username" class="text-sm font-semibold text-yellow-gray-00 mt-1">...</h3>
       <div class="rank-badge text-xs">Rank Level:<span class="ml-1">74</span></div>
-      <div class="balance-badge">Gaming Balance:<span id="balance" class="ml-1">৳</span></div>
+      <div class="balance-badge">Gaming Balance: ৳<span id="balance" class="ml-1"></span></div>
     </div>
 
     <nav class="p-4 space-y-3">
@@ -525,7 +525,7 @@ function subscribeUserBalance() {
 
       const balanceElement = document.getElementById("balance");
       if (balanceElement) {
-        balanceElement.innerText = data.balance ?? ৳0; // ✅ Update balance in UI
+        balanceElement.innerText = data.balance ?? 0; // ✅ Update balance in UI
       }
     }
   });
