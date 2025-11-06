@@ -488,12 +488,12 @@ await setPersistence(auth, browserLocalPersistence);
 // ✅ Globals
 let teamPhotos = {};
 let teamRatings = {};
-let fixersData = [];
-let hiddenMatchdays = {};
 let currentUserId = null;
+let hiddenMatchdays = {};
+let fixersData = [];
 let countdownInterval = null;
 let activeDocId = null;
-let activeSession = "";  // ✅ NEW — Store session for display
+let activeSession = "";   // ✅ Session saved & always shown
 
 // ✅ Load Team Photos + Ratings
 async function loadTeamPhotosAndRatings() {
@@ -532,7 +532,7 @@ onAuthStateChanged(auth, async (user) => {
   subscribeBannerStatus();
 });
 
-// ✅ Hidden Matchdays
+// ✅ Hidden Matchday Live Sync
 function subscribeHiddenMatchdays() {
   const userRef = doc(db, "users", currentUserId);
   onSnapshot(userRef, (snap) => {
@@ -549,38 +549,25 @@ function subscribeFixers() {
   });
 }
 
-// ✅ Update session display on UI
-function updateSessionDisplay(sessionName) {
-  const place = document.getElementById("sessionDisplslay");
-  if (place) place.textContent = sessionName ?? "";
-}
-
-// ✅ Banner & Countdown
+// ✅ Banner & Session Tracking
 function subscribeBannerStatus() {
   const bannerToggle = document.getElementById("bannerToggle");
   const countdownEl = document.getElementById("countdown");
 
   onSnapshot(collection(db, "toursetting"), (snapshot) => {
-    activeSession = "";     // ✅ reset
     activeDocId = null;
 
     snapshot.forEach(docSnap => {
-      if (docSnap.data().isActive === true) {
-        activeSession = docSnap.data().session;   // ✅ store session
+      const setting = docSnap.data();
+      if (setting.session) activeSession = setting.session;   // ✅ always store last known session
+
+      if (setting.isActive === true) {
         activeDocId = docSnap.id;
+        if (countdownEl) startCountdown(setting.endTime, countdownEl);
       }
     });
 
-    if (activeSession) {
-      bannerToggle.style.display = "block";
-      updateSessionDisplay(activeSession);
-      if (countdownEl) startCountdown(snapshot.docs.find(d => d.data().isActive)?.data().endTime, countdownEl);
-    } else {
-      bannerToggle.style.display = "none";
-      updateSessionDisplay("");
-      clearInterval(countdownInterval);
-    }
-
+    bannerToggle.style.display = activeDocId ? "block" : "none"; // ✅ countdown hide but session still shows
     renderFixers();
   });
 }
@@ -590,21 +577,12 @@ function startCountdown(endTimeStr, element) {
   clearInterval(countdownInterval);
   const endTime = new Date(endTimeStr).getTime();
 
-  async function deactivateTournament() {
-    if (!activeDocId) return;
-    try {
-      await updateDoc(doc(db, "toursetting", activeDocId), { isActive: false });
-    } catch (e) { console.error(e); }
-  }
-
   function update() {
-    const now = Date.now();
-    const diff = endTime - now;
-
+    const diff = endTime - Date.now();
     if (diff <= 0) {
       clearInterval(countdownInterval);
       element.textContent = "0D:0H:0M:0S";
-      deactivateTournament();
+      updateDoc(doc(db, "toursetting", activeDocId), { isActive: false });
       return;
     }
 
@@ -620,7 +598,7 @@ function startCountdown(endTimeStr, element) {
   countdownInterval = setInterval(update, 1000);
 }
 
-// ✅ Render Fixers
+// ✅ Render Fixers (SESSION ALWAYS SHOW)
 function renderFixers() {
   const container = document.getElementById("fixers-list");
   if (!container) return;
@@ -635,14 +613,13 @@ function renderFixers() {
 
   let html = "";
   todayMatches.forEach(fix => {
-
     const team1 = fix.team1.trim().toLowerCase();
     const team2 = fix.team2.trim().toLowerCase();
 
     html += `
       <div class="match-card">
          <div class="league-badge">
-           DLS Champion League ( Session-<span style="font-weight:bold">${activeSession}</span> )
+            DLS Champion League ( Session-<span><b>${activeSession}</b></span> )
          </div>
 
          <div class="team-stack">
@@ -670,20 +647,18 @@ function renderFixers() {
 }
 
 // ✅ Sidebar
-const sidebar = document.getElementById("sidebar");
-const overlay = document.getElementById("overlay");
-document.getElementById("menuButton").addEventListener("click", () => {
+document.getElementById("menuButton").onclick = () => {
   sidebar.classList.add("active");
   overlay.classList.add("active");
-});
-document.getElementById("closeSidebar").addEventListener("click", () => {
+};
+document.getElementById("closeSidebar").onclick = () => {
   sidebar.classList.remove("active");
   overlay.classList.remove("active");
-});
-overlay.addEventListener("click", () => {
+};
+overlay.onclick = () => {
   sidebar.classList.remove("active");
   overlay.classList.remove("active");
-});
+};
 
 // ✅ Logout
 logoutBtn.addEventListener("click", async () => {
@@ -698,12 +673,23 @@ logoutBtn.addEventListener("click", async () => {
   });
 
   if (result.isConfirmed) {
-    await signOut(auth);
-    Swal.fire({ icon: "success", title: "Logged out!", timer: 1500, showConfirmButton: false });
-    setTimeout(() => window.location.href = "login.html", 1500);
+    try {
+      await signOut(auth);
+      Swal.fire({
+        icon: "success",
+        title: "Logged out successfully!",
+        showConfirmButton: false,
+        timer: 1500
+      });
+      setTimeout(() => {
+        window.location.href = "login.html";
+      }, 1500);
+    } catch (error) {
+      Swal.fire("Error", "Failed to log out. Please try again.", "error");
+    }
   }
 });
 </script>
 
 </body>
-  </html>
+</html>
